@@ -316,6 +316,16 @@ func (c *Client) RecreateContainer(ctx context.Context, containerID string, user
 		return fmt.Errorf("failed to start new container: %w", err)
 	}
 
+	// Prune old image
+	if inspect.Image != "" {
+		if _, err := c.api.ImageRemove(ctx, inspect.Image, image.RemoveOptions{PruneChildren: true}); err == nil {
+			fmt.Printf("Pruned old image: %s\n", inspect.Image)
+		} else {
+			// Debug log
+			fmt.Printf("Failed to prune old image %s: %v\n", inspect.Image, err)
+		}
+	}
+
 	return nil
 }
 

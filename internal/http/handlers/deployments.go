@@ -317,3 +317,74 @@ func (h *DeploymentHandler) Deploy(c *gin.Context) {
 		"containers": containers,
 	})
 }
+
+func (h *DeploymentHandler) Stop(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	deploymentID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
+		return
+	}
+
+	var deployment models.Deployment
+	if err := h.db.Where("id = ? AND user_id = ?", deploymentID, userID).First(&deployment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	if err := h.docker.StopProjectContainers(c.Request.Context(), userID, uint(deploymentID)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to stop containers: " + err.Error()})
+		return
+	}
+
+	deployment.Status = "stopped"
+	h.db.Save(&deployment)
+
+	c.JSON(http.StatusOK, gin.H{"message": "deployment stopped", "status": "stopped"})
+}
+
+func (h *DeploymentHandler) Start(c *gin.Context) {
+
+	userID := httputil.GetUserID(c)
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	deploymentID, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid deployment id"})
+		return
+	}
+
+	var deployment models.Deployment
+	if err := h.db.Where("id = ? AND user_id = ?", deploymentID, userID).First(&deployment).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "deployment not found"})
+		return
+	}
+
+	deployed, redeployed, err := h.docker.SmartStartCompose(c.Request.Context(), userID, uint(deploymentID), deployment.ProjectName, deployment.RawYAML)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start containers: " + err.Error()})
+		return
+	}
+
+	deployment.Status = "running"
+	h.db.Save(&deployment)
+
+	msg := "deployment started"
+	if redeployed {
+		msg = "deployment updated and started"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    msg,
+		"status":     "running",
+		"containers": deployed, // might be nil if only started, but frontend re-fetches list usually
+	})
+}

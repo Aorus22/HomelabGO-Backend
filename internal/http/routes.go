@@ -55,6 +55,8 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			deployments.DELETE("/:id", deploymentHandler.Delete)
 			deployments.POST("/:id/validate", deploymentHandler.Validate)
 			deployments.POST("/:id/deploy", deploymentHandler.Deploy)
+			deployments.POST("/:id/stop", deploymentHandler.Stop)
+			deployments.POST("/:id/start", deploymentHandler.Start)
 		}
 
 		containers := protected.Group("/containers")

@@ -89,6 +89,15 @@ func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint,
 		return nil, fmt.Errorf("failed to ensure user network: %w", err)
 	}
 
+	// Snapshot old images
+	oldImageIDs := make(map[string]bool)
+	existingContainers, _ := c.GetProjectContainers(ctx, userID, projectID)
+	for _, ctr := range existingContainers {
+		if json, err := c.api.ContainerInspect(ctx, ctr.ID); err == nil {
+			oldImageIDs[json.Image] = true
+		}
+	}
+
 	deployed := make([]DeployedContainer, 0, len(compose.Services))
 
 	for serviceName, service := range compose.Services {
@@ -101,8 +110,14 @@ func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint,
 			_ = c.api.ContainerRemove(ctx, existing, container.RemoveOptions{Force: true})
 		}
 
+		// Ensure image exists (Pull)
 		reader, err := c.api.ImagePull(ctx, service.Image, image.PullOptions{})
 		if err != nil {
+			// Try to pull, if fail, check if we have it locally
+			_, _, inspectErr := c.api.ImageInspectWithRaw(ctx, service.Image)
+			if inspectErr != nil {
+				return nil, fmt.Errorf("failed to pull image '%s': %w", service.Image, err)
+			}
 		} else {
 			defer reader.Close()
 			_, _ = io.Copy(io.Discard, reader)
@@ -119,6 +134,9 @@ func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint,
 			if len(parts) >= 2 {
 				// Replace volume name with user-specific volume
 				sourceName := fmt.Sprintf("vol_user_%d_%s", userID, parts[0])
+				// Auto-create volume if not exists
+				_, _ = c.CreateVolume(ctx, userID, parts[0])
+
 				mounts = append(mounts, mount.Mount{
 					Type:   mount.TypeVolume,
 					Source: sourceName,
@@ -176,7 +194,106 @@ func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint,
 		})
 	}
 
+	// Prune old images
+	for imgID := range oldImageIDs {
+		if _, err := c.api.ImageRemove(ctx, imgID, image.RemoveOptions{PruneChildren: true}); err == nil {
+			fmt.Printf("Pruned old image: %s\n", imgID)
+		}
+	}
+
 	return deployed, nil
+}
+
+func (c *Client) GetProjectContainers(ctx context.Context, userID uint, projectID uint) ([]container.Summary, error) {
+	if c.api == nil {
+		return nil, fmt.Errorf("docker client is not initialized")
+	}
+
+	args := filters.NewArgs()
+	args.Add("label", fmt.Sprintf("owner_id=%d", userID))
+	args.Add("label", fmt.Sprintf("project_id=%d", projectID))
+	args.Add("label", "managed_by=homelabgo")
+
+	return c.api.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: args,
+	})
+}
+
+func (c *Client) StopProjectContainers(ctx context.Context, userID uint, projectID uint) error {
+	containers, err := c.GetProjectContainers(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		_ = c.api.ContainerStop(ctx, ctr.ID, container.StopOptions{})
+	}
+	return nil
+}
+
+func (c *Client) StartProjectContainers(ctx context.Context, userID uint, projectID uint) error {
+	containers, err := c.GetProjectContainers(ctx, userID, projectID)
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		_ = c.api.ContainerStart(ctx, ctr.ID, container.StartOptions{})
+	}
+	return nil
+}
+
+func (c *Client) SmartStartCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string) ([]DeployedContainer, bool, error) {
+	// 1. Parse YAML to see desired state
+	compose, err := ParseComposeYAML(yamlContent)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// 2. Get existing containers
+	containers, err := c.GetProjectContainers(ctx, userID, projectID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// 3. Check if all services exist and have correct image (by name check)
+	// We map service_name -> container
+	existingServices := make(map[string]container.Summary)
+	for _, ctr := range containers {
+		if serviceName, ok := ctr.Labels["service_name"]; ok {
+			existingServices[serviceName] = ctr
+		}
+	}
+
+	needsRedeploy := false
+	if len(containers) == 0 {
+		needsRedeploy = true
+	} else {
+		for serviceName, service := range compose.Services {
+			ctr, exists := existingServices[serviceName]
+			if !exists {
+				needsRedeploy = true
+				break
+			}
+
+			// Check if image changed
+			if ctr.Image != service.Image {
+				needsRedeploy = true
+				break
+			}
+		}
+	}
+
+	if needsRedeploy {
+		// Call DeployCompose (which pulls, creates, prunes)
+		deployed, err := c.DeployCompose(ctx, userID, projectID, projectName, yamlContent)
+		return deployed, true, err
+	} else {
+		// Just start existing
+		err := c.StartProjectContainers(ctx, userID, projectID)
+		return nil, false, err
+	}
 }
 
 func (c *Client) findContainerByName(ctx context.Context, name string) (string, error) {

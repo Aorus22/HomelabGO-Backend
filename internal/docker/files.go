@@ -268,3 +268,82 @@ func (c *Client) CreateContainerDir(ctx context.Context, containerID string, use
 
 	return c.api.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
 }
+
+func (c *Client) DeleteContainerFile(ctx context.Context, containerID string, userID uint, path string) error {
+	if c.api == nil {
+		return fmt.Errorf("docker client is not initialized")
+	}
+
+	_, err := c.GetContainerByID(ctx, containerID, userID)
+	if err != nil {
+		return err
+	}
+
+	cmd := []string{"rm", "-rf", path}
+
+	execConfig := container.ExecOptions{
+		AttachStderr: true,
+		Cmd:          cmd,
+	}
+
+	execID, err := c.api.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return err
+	}
+
+	return c.api.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
+}
+
+func (c *Client) RenameContainerFile(ctx context.Context, containerID string, userID uint, oldPath, newPath string) error {
+	if c.api == nil {
+		return fmt.Errorf("docker client is not initialized")
+	}
+
+	_, err := c.GetContainerByID(ctx, containerID, userID)
+	if err != nil {
+		return err
+	}
+
+	cmd := []string{"mv", oldPath, newPath}
+
+	execConfig := container.ExecOptions{
+		AttachStderr: true,
+		Cmd:          cmd,
+	}
+
+	execID, err := c.api.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return err
+	}
+
+	return c.api.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
+}
+
+func (c *Client) CopyContainerFile(ctx context.Context, containerID string, userID uint, source, destination string) error {
+	if c.api == nil {
+		return fmt.Errorf("docker client is not initialized")
+	}
+
+	_, err := c.GetContainerByID(ctx, containerID, userID)
+	if err != nil {
+		return err
+	}
+
+	cmd := []string{"cp", "-r", source, destination}
+
+	execConfig := container.ExecOptions{
+		AttachStderr: true,
+		Cmd:          cmd,
+	}
+
+	execID, err := c.api.ContainerExecCreate(ctx, containerID, execConfig)
+	if err != nil {
+		return err
+	}
+
+	return c.api.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
+}
+
+func (c *Client) MoveContainerFile(ctx context.Context, containerID string, userID uint, source, destination string) error {
+	return c.RenameContainerFile(ctx, containerID, userID, source, destination)
+}

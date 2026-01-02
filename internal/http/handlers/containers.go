@@ -189,3 +189,47 @@ func (h *ContainerHandler) Recreate(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "container recreated successfully"})
 }
+
+func (h *ContainerHandler) Stats(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	containerID := c.Param("id")
+	if containerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "container id required"})
+		return
+	}
+
+	stats, err := h.docker.GetContainerStats(c.Request.Context(), containerID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get stats: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+func (h *ContainerHandler) Mounts(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	containerID := c.Param("id")
+	if containerID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "container id required"})
+		return
+	}
+
+	mounts, err := h.docker.GetContainerMounts(c.Request.Context(), containerID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get mounts: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, mounts)
+}

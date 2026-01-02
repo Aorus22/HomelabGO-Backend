@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -316,4 +317,121 @@ func (c *Client) RecreateContainer(ctx context.Context, containerID string, user
 	}
 
 	return nil
+}
+
+type ContainerStats struct {
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryUsage   uint64  `json:"memory_usage"`
+	MemoryLimit   uint64  `json:"memory_limit"`
+	MemoryPercent float64 `json:"memory_percent"`
+	NetworkRx     uint64  `json:"network_rx"`
+	NetworkTx     uint64  `json:"network_tx"`
+}
+
+func (c *Client) GetContainerStats(ctx context.Context, containerID string, userID uint) (*ContainerStats, error) {
+	if c.api == nil {
+		return nil, fmt.Errorf("docker client is not initialized")
+	}
+
+	_, err := c.GetContainerByID(ctx, containerID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats, err := c.api.ContainerStatsOneShot(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+	defer stats.Body.Close()
+
+	var statJSON struct {
+		CPUStats struct {
+			CPUUsage struct {
+				TotalUsage  uint64   `json:"total_usage"`
+				PercpuUsage []uint64 `json:"percpu_usage"`
+			} `json:"cpu_usage"`
+			SystemUsage uint64 `json:"system_cpu_usage"`
+		} `json:"cpu_stats"`
+		PreCPUStats struct {
+			CPUUsage struct {
+				TotalUsage uint64 `json:"total_usage"`
+			} `json:"cpu_usage"`
+			SystemUsage uint64 `json:"system_cpu_usage"`
+		} `json:"precpu_stats"`
+		MemoryStats struct {
+			Usage uint64 `json:"usage"`
+			Limit uint64 `json:"limit"`
+		} `json:"memory_stats"`
+		Networks map[string]struct {
+			RxBytes uint64 `json:"rx_bytes"`
+			TxBytes uint64 `json:"tx_bytes"`
+		} `json:"networks"`
+	}
+	if err := json.NewDecoder(stats.Body).Decode(&statJSON); err != nil {
+		return nil, err
+	}
+
+	cpuDelta := float64(statJSON.CPUStats.CPUUsage.TotalUsage - statJSON.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(statJSON.CPUStats.SystemUsage - statJSON.PreCPUStats.SystemUsage)
+	cpuPercent := 0.0
+	if systemDelta > 0 && cpuDelta > 0 {
+		cpuPercent = (cpuDelta / systemDelta) * float64(len(statJSON.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	}
+
+	memoryPercent := 0.0
+	if statJSON.MemoryStats.Limit > 0 {
+		memoryPercent = (float64(statJSON.MemoryStats.Usage) / float64(statJSON.MemoryStats.Limit)) * 100.0
+	}
+
+	var networkRx, networkTx uint64
+	for _, netStats := range statJSON.Networks {
+		networkRx += netStats.RxBytes
+		networkTx += netStats.TxBytes
+	}
+
+	return &ContainerStats{
+		CPUPercent:    cpuPercent,
+		MemoryUsage:   statJSON.MemoryStats.Usage,
+		MemoryLimit:   statJSON.MemoryStats.Limit,
+		MemoryPercent: memoryPercent,
+		NetworkRx:     networkRx,
+		NetworkTx:     networkTx,
+	}, nil
+}
+
+type MountInfo struct {
+	Type        string `json:"type"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Mode        string `json:"mode"`
+	RW          bool   `json:"rw"`
+}
+
+func (c *Client) GetContainerMounts(ctx context.Context, containerID string, userID uint) ([]MountInfo, error) {
+	if c.api == nil {
+		return nil, fmt.Errorf("docker client is not initialized")
+	}
+
+	_, err := c.GetContainerByID(ctx, containerID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	inspect, err := c.api.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	mounts := make([]MountInfo, len(inspect.Mounts))
+	for i, mount := range inspect.Mounts {
+		mounts[i] = MountInfo{
+			Type:        string(mount.Type),
+			Source:      mount.Source,
+			Destination: mount.Destination,
+			Mode:        mount.Mode,
+			RW:          mount.RW,
+		}
+	}
+
+	return mounts, nil
 }

@@ -171,3 +171,106 @@ func (h *ContainerFileHandler) CreateDirectory(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "path": path})
 }
+
+func (h *ContainerFileHandler) DeleteFile(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	containerID := c.Param("id")
+	path := c.Query("path")
+
+	if path == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+
+	err := h.docker.DeleteContainerFile(c.Request.Context(), containerID, userID, path)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *ContainerFileHandler) RenameFile(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	containerID := c.Param("id")
+
+	var req struct {
+		OldPath string `json:"old_path"`
+		NewPath string `json:"new_path"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "old_path and new_path are required"})
+		return
+	}
+
+	if req.OldPath == "" || req.NewPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "old_path and new_path are required"})
+		return
+	}
+
+	err := h.docker.RenameContainerFile(c.Request.Context(), containerID, userID, req.OldPath, req.NewPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "path": req.NewPath})
+}
+
+func (h *ContainerFileHandler) CopyFile(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	containerID := c.Param("id")
+
+	var req struct {
+		Source      string `json:"source"`
+		Destination string `json:"destination"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and destination are required"})
+		return
+	}
+
+	if req.Source == "" || req.Destination == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and destination are required"})
+		return
+	}
+
+	err := h.docker.CopyContainerFile(c.Request.Context(), containerID, userID, req.Source, req.Destination)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "destination": req.Destination})
+}
+
+func (h *ContainerFileHandler) MoveFile(c *gin.Context) {
+	userID := httputil.GetUserID(c)
+	containerID := c.Param("id")
+
+	var req struct {
+		Source      string `json:"source"`
+		Destination string `json:"destination"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and destination are required"})
+		return
+	}
+
+	if req.Source == "" || req.Destination == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "source and destination are required"})
+		return
+	}
+
+	err := h.docker.MoveContainerFile(c.Request.Context(), containerID, userID, req.Source, req.Destination)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "destination": req.Destination})
+}

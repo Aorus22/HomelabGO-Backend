@@ -65,6 +65,8 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			containers.POST("/:id/recreate", containerHandler.Recreate)
 			containers.POST("/:id/pull", containerHandler.Pull)
 			containers.GET("/:id/logs", containerHandler.Logs)
+			containers.GET("/:id/stats", containerHandler.Stats)
+			containers.GET("/:id/mounts", containerHandler.Mounts)
 
 			containerFiles := containers.Group("/:id/files")
 			{
@@ -74,6 +76,10 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 				containerFiles.POST("/upload", containerFileHandler.UploadFile)
 				containerFiles.PUT("", containerFileHandler.SaveFileContent)
 				containerFiles.POST("/mkdir", containerFileHandler.CreateDirectory)
+				containerFiles.DELETE("", containerFileHandler.DeleteFile)
+				containerFiles.POST("/rename", containerFileHandler.RenameFile)
+				containerFiles.POST("/copy", containerFileHandler.CopyFile)
+				containerFiles.POST("/move", containerFileHandler.MoveFile)
 			}
 		}
 

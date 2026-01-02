@@ -21,6 +21,7 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 	volumeHandler := handlers.NewVolumeHandler(deps.DB, deps.Docker)
 	deploymentHandler := handlers.NewDeploymentHandler(deps.DB, deps.Docker)
 	containerHandler := handlers.NewContainerHandler(deps.DB, deps.Docker)
+	containerFileHandler := handlers.NewContainerFileHandler(deps.Docker)
 	fileHandler := handlers.NewFileHandler(deps.DB, deps.Config.DataVolumePath)
 	cloudflareHandler := handlers.NewCloudflareHandler(deps.DB, deps.Docker)
 	wsHandler := handlers.NewWebSocketHandler(deps.Docker, deps.Config.JWTSecret)
@@ -64,6 +65,16 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			containers.POST("/:id/recreate", containerHandler.Recreate)
 			containers.POST("/:id/pull", containerHandler.Pull)
 			containers.GET("/:id/logs", containerHandler.Logs)
+
+			containerFiles := containers.Group("/:id/files")
+			{
+				containerFiles.GET("", containerFileHandler.ListFiles)
+				containerFiles.GET("/content", containerFileHandler.GetFileContent)
+				containerFiles.GET("/download", containerFileHandler.DownloadFile)
+				containerFiles.POST("/upload", containerFileHandler.UploadFile)
+				containerFiles.PUT("", containerFileHandler.SaveFileContent)
+				containerFiles.POST("/mkdir", containerFileHandler.CreateDirectory)
+			}
 		}
 
 		files := protected.Group("/files")

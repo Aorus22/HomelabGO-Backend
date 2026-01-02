@@ -1,0 +1,228 @@
+package docker
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
+	"github.com/goccy/go-yaml"
+)
+
+type ComposeService struct {
+	Image       string            `yaml:"image"`
+	Environment map[string]string `yaml:"environment,omitempty"`
+	Ports       []string          `yaml:"ports,omitempty"`
+	Volumes     []string          `yaml:"volumes,omitempty"`
+	Command     string            `yaml:"command,omitempty"`
+	Restart     string            `yaml:"restart,omitempty"`
+}
+
+type ComposeFile struct {
+	Version  string                    `yaml:"version,omitempty"`
+	Services map[string]ComposeService `yaml:"services"`
+}
+
+func ParseComposeYAML(yamlContent string) (*ComposeFile, error) {
+	var compose ComposeFile
+	if err := yaml.Unmarshal([]byte(yamlContent), &compose); err != nil {
+		return nil, fmt.Errorf("invalid YAML: %w", err)
+	}
+
+	if len(compose.Services) == 0 {
+		return nil, fmt.Errorf("no services defined")
+	}
+
+	return &compose, nil
+}
+
+func ValidateComposeYAML(yamlContent string) error {
+	compose, err := ParseComposeYAML(yamlContent)
+	if err != nil {
+		return err
+	}
+
+	for name, service := range compose.Services {
+		if service.Image == "" {
+			return fmt.Errorf("service '%s': image is required", name)
+		}
+
+		for _, port := range service.Ports {
+			if !isValidPortMapping(port) {
+				return fmt.Errorf("service '%s': invalid port mapping '%s'", name, port)
+			}
+		}
+	}
+
+	return nil
+}
+
+func isValidPortMapping(port string) bool {
+	parts := strings.Split(port, ":")
+	return len(parts) >= 1 && len(parts) <= 3
+}
+
+type DeployedContainer struct {
+	ID          string
+	Name        string
+	ServiceName string
+}
+
+func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string) ([]DeployedContainer, error) {
+	if c.api == nil {
+		return nil, fmt.Errorf("docker client is not initialized")
+	}
+
+	compose, err := ParseComposeYAML(yamlContent)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure user network exists
+	networkID, err := c.EnsureUserNetwork(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure user network: %w", err)
+	}
+
+	deployed := make([]DeployedContainer, 0, len(compose.Services))
+
+	for serviceName, service := range compose.Services {
+		containerName := fmt.Sprintf("%s_%s_user_%d", projectName, serviceName, userID)
+
+		// Check if container already exists
+		existing, err := c.findContainerByName(ctx, containerName)
+		if err == nil && existing != "" {
+			// Remove existing container
+			_ = c.api.ContainerRemove(ctx, existing, container.RemoveOptions{Force: true})
+		}
+
+		reader, err := c.api.ImagePull(ctx, service.Image, image.PullOptions{})
+		if err != nil {
+		} else {
+			defer reader.Close()
+			_, _ = io.Copy(io.Discard, reader)
+		}
+
+		env := make([]string, 0, len(service.Environment))
+		for k, v := range service.Environment {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+
+		mounts := make([]mount.Mount, 0, len(service.Volumes))
+		for _, v := range service.Volumes {
+			parts := strings.Split(v, ":")
+			if len(parts) >= 2 {
+				// Replace volume name with user-specific volume
+				sourceName := fmt.Sprintf("vol_user_%d_%s", userID, parts[0])
+				mounts = append(mounts, mount.Mount{
+					Type:   mount.TypeVolume,
+					Source: sourceName,
+					Target: parts[1],
+				})
+			}
+		}
+
+		config := &container.Config{
+			Image: service.Image,
+			Env:   env,
+			Labels: map[string]string{
+				"owner_id":     fmt.Sprintf("%d", userID),
+				"project_id":   fmt.Sprintf("%d", projectID),
+				"project_name": projectName,
+				"service_name": serviceName,
+				"managed_by":   "homelabgo",
+			},
+		}
+
+		if service.Command != "" {
+			config.Cmd = strings.Fields(service.Command)
+		}
+
+		hostConfig := &container.HostConfig{
+			Mounts:      mounts,
+			NetworkMode: container.NetworkMode(fmt.Sprintf("net_user_%d", userID)),
+		}
+
+		if service.Restart != "" {
+			hostConfig.RestartPolicy = container.RestartPolicy{Name: container.RestartPolicyMode(service.Restart)}
+		}
+
+		networkConfig := &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				fmt.Sprintf("net_user_%d", userID): {
+					NetworkID: networkID,
+				},
+			},
+		}
+
+		resp, err := c.api.ContainerCreate(ctx, config, hostConfig, networkConfig, nil, containerName)
+		if err != nil {
+			return deployed, fmt.Errorf("failed to create container '%s': %w", serviceName, err)
+		}
+
+		if err := c.api.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+			return deployed, fmt.Errorf("failed to start container '%s': %w", serviceName, err)
+		}
+
+		deployed = append(deployed, DeployedContainer{
+			ID:          resp.ID,
+			Name:        containerName,
+			ServiceName: serviceName,
+		})
+	}
+
+	return deployed, nil
+}
+
+func (c *Client) findContainerByName(ctx context.Context, name string) (string, error) {
+	args := filters.NewArgs()
+	args.Add("name", name)
+
+	containers, err := c.api.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: args,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	for _, ctr := range containers {
+		for _, n := range ctr.Names {
+			if strings.TrimPrefix(n, "/") == name {
+				return ctr.ID, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("container not found")
+}
+
+func (c *Client) RemoveProjectContainers(ctx context.Context, userID uint, projectID uint) error {
+	if c.api == nil {
+		return fmt.Errorf("docker client is not initialized")
+	}
+
+	args := filters.NewArgs()
+	args.Add("label", fmt.Sprintf("owner_id=%d", userID))
+	args.Add("label", fmt.Sprintf("project_id=%d", projectID))
+	args.Add("label", "managed_by=homelabgo")
+
+	containers, err := c.api.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: args,
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, ctr := range containers {
+		_ = c.api.ContainerRemove(ctx, ctr.ID, container.RemoveOptions{Force: true})
+	}
+
+	return nil
+}

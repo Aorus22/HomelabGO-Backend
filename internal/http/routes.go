@@ -42,6 +42,8 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			volumes.GET("", volumeHandler.List)
 			volumes.POST("", volumeHandler.Create)
 			volumes.DELETE("/:id", volumeHandler.Delete)
+			volumes.GET("/:id/download", volumeHandler.Download)
+			volumes.POST("/upload", volumeHandler.Upload)
 		}
 
 		deployments := protected.Group("/deployments")

@@ -193,6 +193,16 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			// Ports & Networks
 			systemGroup.GET("/ports", adminSystemHandler.ListPorts)
 			systemGroup.GET("/networks", adminSystemHandler.ListNetworks)
+
+			// Process Manager
+			systemGroup.GET("/processes", adminSystemHandler.ListProcesses)
+			systemGroup.DELETE("/processes/:pid", adminSystemHandler.KillProcess)
+
+			// Firewall
+			systemGroup.GET("/firewall", adminSystemHandler.GetFirewall)
+			systemGroup.POST("/firewall/toggle", adminSystemHandler.ToggleFirewall)
+			systemGroup.POST("/firewall/rules", adminSystemHandler.AddFirewallRule)
+			systemGroup.DELETE("/firewall/rules/:id", adminSystemHandler.DeleteFirewallRule)
 		}
 	}
 }

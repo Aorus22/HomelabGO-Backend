@@ -113,3 +113,78 @@ func (h *AdminSystemHandler) ListNetworks(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, ifaces)
 }
+
+func (h *AdminSystemHandler) ListProcesses(c *gin.Context) {
+	procs, err := system.GetProcesses()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, procs)
+}
+
+func (h *AdminSystemHandler) KillProcess(c *gin.Context) {
+	pid := c.Param("pid")
+	if pid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "PID required"})
+		return
+	}
+
+	if err := system.KillProcess(pid); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "killed"})
+}
+
+func (h *AdminSystemHandler) GetFirewall(c *gin.Context) {
+	status, err := system.GetFirewallStatus()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func (h *AdminSystemHandler) ToggleFirewall(c *gin.Context) {
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := system.ToggleFirewall(req.Enable); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *AdminSystemHandler) AddFirewallRule(c *gin.Context) {
+	var req struct {
+		Port   string `json:"port"`
+		Proto  string `json:"proto"`
+		Action string `json:"action"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := system.AddFirewallRule(req.Port, req.Proto, req.Action); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *AdminSystemHandler) DeleteFirewallRule(c *gin.Context) {
+	id := c.Param("id")
+	if err := system.DeleteFirewallRule(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}

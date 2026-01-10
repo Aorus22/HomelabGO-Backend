@@ -402,3 +402,212 @@ func GetNetworkInterfaces() ([]NetworkInterface, error) {
 	}
 	return result, nil
 }
+
+type Process struct {
+	PID     string `json:"pid"`
+	User    string `json:"user"`
+	CPU     string `json:"cpu"`
+	Memory  string `json:"memory"`
+	Command string `json:"command"`
+}
+
+func GetProcesses() ([]Process, error) {
+	// ps -eo pid,user,%cpu,%mem,comm --sort=-%cpu | head -n 50
+	cmd := exec.Command("ps", "-eo", "pid,user,%cpu,%mem,comm", "--sort=-%cpu")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get processes: %v", err)
+	}
+
+	var processes []Process
+	lines := strings.Split(string(out), "\n")
+
+	// Skip header (first line)
+	if len(lines) > 0 {
+		lines = lines[1:]
+	}
+
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+
+		// fields: PID USER %CPU %MEM COMMAND
+		// COMMAND might contain spaces if we didn't use 'comm', but 'comm' usually truncated
+		// Using 'comm' (command name only) is safer for parsing than 'args'
+
+		processes = append(processes, Process{
+			PID:     fields[0],
+			User:    fields[1],
+			CPU:     fields[2],
+			Memory:  fields[3],
+			Command: strings.Join(fields[4:], " "), // In case comm has spaces
+		})
+
+		// Limit to top 50
+		if len(processes) >= 50 {
+			break
+		}
+	}
+	return processes, nil
+}
+
+func KillProcess(pid string) error {
+	// Safety check: don't allow killing init or self easily via API if possible,
+	// but for now relying on sudo/user permissions.
+	// Using sudo kill -9
+	cmd := exec.Command("sudo", "kill", "-9", pid)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to kill process %s: %v, output: %s", pid, err, string(out))
+	}
+	return nil
+}
+
+type FirewallRule struct {
+	Index   string `json:"index"`
+	To      string `json:"to"`
+	Action  string `json:"action"`
+	From    string `json:"from"`
+	Comment string `json:"comment"`
+}
+
+type FirewallStatus struct {
+	Status string         `json:"status"` // active, inactive
+	Rules  []FirewallRule `json:"rules"`
+}
+
+func GetFirewallStatus() (*FirewallStatus, error) {
+	cmd := exec.Command("sudo", "ufw", "status", "numbered")
+	out, err := cmd.CombinedOutput()
+	// ufw exits with 0 even if inactive, but output says "Status: inactive"
+	// if command fails (e.g. not installed), we assume inactive or error.
+
+	output := string(out)
+	status := "inactive"
+	if strings.Contains(output, "Status: active") {
+		status = "active"
+	}
+
+	var rules []FirewallRule
+	if status == "active" {
+		lines := strings.Split(output, "\n")
+		// Output format:
+		// Status: active
+		//
+		//      To                         Action      From
+		//      --                         ------      ----
+		// [ 1] 22/tcp                     ALLOW IN    Anywhere
+		// [ 2] 80                         ALLOW IN    Anywhere
+
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "[") {
+				continue
+			}
+
+			// Simple parsing based on brackets
+			// [ 1] 22/tcp                     ALLOW IN    Anywhere
+
+			closeBracket := strings.Index(line, "]")
+			if closeBracket == -1 {
+				continue
+			}
+
+			index := strings.TrimSpace(line[1:closeBracket])
+			rest := line[closeBracket+1:]
+
+			fields := strings.Fields(rest)
+			// fields: To, Action(ALLOW, IN...), From...
+
+			if len(fields) >= 3 {
+				to := fields[0]
+
+				// Find where "Action" ends (ALLOW IN, DENY IN, ALLOW OUT, etc)
+				// Let's assume the last part is "From" (maybe multiple words if (v6))
+				// But "From" usually starts after Action.
+				// This simple parser might be fragile.
+
+				action := fields[1]
+				if len(fields) > 2 && (fields[2] == "IN" || fields[2] == "OUT" || fields[2] == "FWD") {
+					action = fields[1] + " " + fields[2]
+				}
+
+				// Reconstruct From
+				// Find where Action ends in the substring
+				actionIndex := strings.Index(rest, action)
+				if actionIndex != -1 {
+					fromPart := strings.TrimSpace(rest[actionIndex+len(action):])
+					rules = append(rules, FirewallRule{
+						Index:  index,
+						To:     to,
+						Action: action,
+						From:   fromPart,
+					})
+				}
+			}
+		}
+	}
+
+	if err != nil && !strings.Contains(output, "Status:") {
+		// Real error, maybe ufw not installed
+		return nil, fmt.Errorf("failed to get ufw status: %v", err)
+	}
+
+	return &FirewallStatus{
+		Status: status,
+		Rules:  rules,
+	}, nil
+}
+
+func ToggleFirewall(enable bool) error {
+	action := "disable"
+	if enable {
+		action = "enable"
+	}
+	// ufw enable requires 'y' confirmation usually, so use --force or echo y
+	// sudo ufw --force enable
+	var cmd *exec.Cmd
+	if enable {
+		cmd = exec.Command("sudo", "ufw", "--force", "enable")
+	} else {
+		cmd = exec.Command("sudo", "ufw", "disable")
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to %s firewall: %v, output: %s", action, err, string(out))
+	}
+	return nil
+}
+
+func AddFirewallRule(port, proto, action string) error {
+	// sudo ufw allow 80/tcp
+	// action: allow, deny
+	if action != "allow" && action != "deny" {
+		return fmt.Errorf("invalid action")
+	}
+
+	target := port
+	if proto != "" && proto != "any" {
+		target = fmt.Sprintf("%s/%s", port, proto)
+	}
+
+	cmd := exec.Command("sudo", "ufw", action, target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to add rule: %v, output: %s", err, string(out))
+	}
+	return nil
+}
+
+func DeleteFirewallRule(index string) error {
+	// sudo ufw --force delete <index>
+	// --force prevents confirmation prompt "Delete rule 1 (y|n)?"
+	cmd := exec.Command("sudo", "ufw", "--force", "delete", index)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete rule: %v, output: %s", err, string(out))
+	}
+	return nil
+}

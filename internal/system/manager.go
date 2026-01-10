@@ -611,3 +611,120 @@ func DeleteFirewallRule(index string) error {
 	}
 	return nil
 }
+
+type RcloneRemote struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+func ListRcloneRemotes() ([]string, error) {
+	// rclone listremotes
+	cmd := exec.Command("rclone", "listremotes")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list remotes: %v, output: %s", err, string(out))
+	}
+
+	var remotes []string
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			// Output is like "gdrive:"
+			remotes = append(remotes, strings.TrimSuffix(trimmed, ":"))
+		}
+	}
+	return remotes, nil
+}
+
+func CreateRcloneRemote(name, provider string, config map[string]string) error {
+	args := []string{"config", "create", name, provider}
+	for k, v := range config {
+		args = append(args, fmt.Sprintf("%s=%s", k, v))
+	}
+	// rclone config create ...
+	cmd := exec.Command("rclone", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create remote: %v, output: %s", err, string(out))
+	}
+	return nil
+}
+
+func DeleteRcloneRemote(name string) error {
+	cmd := exec.Command("rclone", "config", "delete", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete remote: %v, output: %s", err, string(out))
+	}
+	return nil
+}
+
+// Mount Remote using Systemd for persistence
+// This creates a systemd user unit or system unit.
+// For simplicity in HomelabGO, we create system Service /etc/systemd/system/rclone-mount-<name>.service
+func MountRcloneRemote(remote, localPath string) error {
+	// Validate paths
+	if remote == "" || localPath == "" {
+		return fmt.Errorf("remote and path required")
+	}
+
+	// Make sure mount point exists
+	exec.Command("mkdir", "-p", localPath).Run()
+
+	serviceName := fmt.Sprintf("rclone-mount-%s.service", remote)
+	description := fmt.Sprintf("Rclone mount for %s", remote)
+
+	// Command: rclone mount <remote>: <path> --vfs-cache-mode writes
+	execStart := fmt.Sprintf("/usr/bin/rclone mount %s: %s --vfs-cache-mode writes --allow-other", remote, localPath)
+
+	config := ServiceConfig{
+		Name:        serviceName,
+		Description: description,
+		ExecStart:   execStart,
+		User:        "root", // rclone mount usually needs fuse permission. Root is easiest.
+		AutoStart:   true,
+	}
+
+	return CreateService(config)
+}
+
+func SyncRclone(source, dest string) error {
+	// Async execution? Or synchronous block?
+	// For API, blocking is dangerous if it takes hours.
+	// Ideally we spawn it with nohup/screen or just standard 'go func' but we can't track status easily.
+	// For MVP: Blocking but with small timeout context? No, rclone sync takes time.
+	// Solution: Run in background, generic way.
+
+	cmd := exec.Command("nohup", "rclone", "sync", source, dest, "&")
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start sync: %v", err)
+	}
+	return nil
+}
+
+func IsRcloneInstalled() bool {
+	_, err := exec.LookPath("rclone")
+	return err == nil
+}
+
+func InstallRclone() error {
+	// Try apt-get for Debian/Ubuntu based systems
+	// Check if apt-get exists
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		exec.Command("sudo", "apt-get", "update").Run()
+		cmd := exec.Command("sudo", "apt-get", "install", "-y", "rclone")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("apt-get install failed: %v, output: %s", err, string(out))
+		}
+		return nil
+	}
+
+	// Fallback to curl script?
+	// curl https://rclone.org/install.sh | sudo bash
+	// cmd := exec.Command("bash", "-c", "curl https://rclone.org/install.sh | sudo bash")
+	// This might fail if curl not present or sudo requires password interactively (though we assume passwordless sudo for admin tasks usually)
+
+	return fmt.Errorf("automatic install not supported (apt-get not found)")
+}

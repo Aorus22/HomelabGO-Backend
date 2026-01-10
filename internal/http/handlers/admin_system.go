@@ -188,3 +188,86 @@ func (h *AdminSystemHandler) DeleteFirewallRule(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
+
+func (h *AdminSystemHandler) ListRcloneRemotes(c *gin.Context) {
+	remotes, err := system.ListRcloneRemotes()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, remotes)
+}
+
+func (h *AdminSystemHandler) CreateRcloneRemote(c *gin.Context) {
+	var req struct {
+		Name     string            `json:"name"`
+		Provider string            `json:"provider"`
+		Config   map[string]string `json:"config"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := system.CreateRcloneRemote(req.Name, req.Provider, req.Config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "created"})
+}
+
+func (h *AdminSystemHandler) DeleteRcloneRemote(c *gin.Context) {
+	name := c.Param("name")
+	if err := system.DeleteRcloneRemote(name); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "deleted"})
+}
+
+func (h *AdminSystemHandler) MountRcloneRemote(c *gin.Context) {
+	var req struct {
+		Remote    string `json:"remote"`
+		LocalPath string `json:"path"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := system.MountRcloneRemote(req.Remote, req.LocalPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "mounted"})
+}
+
+func (h *AdminSystemHandler) SyncRclone(c *gin.Context) {
+	var req struct {
+		Source string `json:"source"`
+		Dest   string `json:"dest"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := system.SyncRclone(req.Source, req.Dest); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "sync_started"})
+}
+
+func (h *AdminSystemHandler) GetRcloneStatus(c *gin.Context) {
+	installed := system.IsRcloneInstalled()
+	c.JSON(http.StatusOK, gin.H{"installed": installed})
+}
+
+func (h *AdminSystemHandler) InstallRclone(c *gin.Context) {
+	if err := system.InstallRclone(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "installed"})
+}

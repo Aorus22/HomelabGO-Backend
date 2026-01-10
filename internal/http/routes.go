@@ -203,6 +203,15 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			systemGroup.POST("/firewall/toggle", adminSystemHandler.ToggleFirewall)
 			systemGroup.POST("/firewall/rules", adminSystemHandler.AddFirewallRule)
 			systemGroup.DELETE("/firewall/rules/:id", adminSystemHandler.DeleteFirewallRule)
+
+			// Rclone
+			systemGroup.GET("/rclone/remotes", adminSystemHandler.ListRcloneRemotes)
+			systemGroup.POST("/rclone/remotes", adminSystemHandler.CreateRcloneRemote)
+			systemGroup.DELETE("/rclone/remotes/:name", adminSystemHandler.DeleteRcloneRemote)
+			systemGroup.POST("/rclone/mount", adminSystemHandler.MountRcloneRemote)
+			systemGroup.POST("/rclone/sync", adminSystemHandler.SyncRclone)
+			systemGroup.GET("/rclone/status", adminSystemHandler.GetRcloneStatus)
+			systemGroup.POST("/rclone/install", adminSystemHandler.InstallRclone)
 		}
 	}
 }

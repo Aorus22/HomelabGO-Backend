@@ -24,6 +24,7 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 	containerFileHandler := handlers.NewContainerFileHandler(deps.Docker)
 	fileHandler := handlers.NewFileHandler(deps.DB, deps.Config.DataVolumePath)
 	cloudflareHandler := handlers.NewCloudflareHandler(deps.DB, deps.Docker)
+	envFileHandler := handlers.NewEnvFileHandler(deps.DB)
 	wsHandler := handlers.NewWebSocketHandler(deps.Docker, deps.Config.JWTSecret)
 
 	router.GET("/health", handlers.Health)
@@ -31,6 +32,7 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 	authGroup := router.Group("/auth")
 	authGroup.POST("/register", authHandler.Register)
 	authGroup.POST("/login", authHandler.Login)
+	authGroup.GET("/me", middleware.JWTAuth(deps.Config.JWTSecret), authHandler.Me)
 
 	protected := router.Group("")
 	protected.Use(middleware.JWTAuth(deps.Config.JWTSecret))
@@ -102,6 +104,15 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 			cloudflare.PUT("", cloudflareHandler.UpdateConfig)
 			cloudflare.GET("/status", cloudflareHandler.GetStatus)
 			cloudflare.GET("/logs", cloudflareHandler.GetLogs)
+		}
+
+		envFiles := protected.Group("/envfiles")
+		{
+			envFiles.GET("", envFileHandler.List)
+			envFiles.POST("", envFileHandler.Create)
+			envFiles.GET("/:id", envFileHandler.Get)
+			envFiles.PUT("/:id", envFileHandler.Update)
+			envFiles.DELETE("/:id", envFileHandler.Delete)
 		}
 	}
 

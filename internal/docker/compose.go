@@ -15,12 +15,13 @@ import (
 )
 
 type ComposeService struct {
-	Image       string            `yaml:"image"`
-	Environment map[string]string `yaml:"environment,omitempty"`
-	Ports       []string          `yaml:"ports,omitempty"`
-	Volumes     []string          `yaml:"volumes,omitempty"`
-	Command     string            `yaml:"command,omitempty"`
-	Restart     string            `yaml:"restart,omitempty"`
+	Image         string            `yaml:"image"`
+	Environment   map[string]string `yaml:"environment,omitempty"`
+	Ports         []string          `yaml:"ports,omitempty"`
+	Volumes       []string          `yaml:"volumes,omitempty"`
+	Command       string            `yaml:"command,omitempty"`
+	Restart       string            `yaml:"restart,omitempty"`
+	XHlgoEnvfiles []int             `yaml:"x-hlgo-envfiles,omitempty"`
 }
 
 type ComposeFile struct {
@@ -73,7 +74,8 @@ type DeployedContainer struct {
 	ServiceName string
 }
 
-func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string) ([]DeployedContainer, error) {
+// envFileContentMap: map[envFileID] => content (KEY=VALUE lines)
+func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string, envFileContentMap map[int]string) ([]DeployedContainer, error) {
 	if c.api == nil {
 		return nil, fmt.Errorf("docker client is not initialized")
 	}
@@ -123,9 +125,23 @@ func (c *Client) DeployCompose(ctx context.Context, userID uint, projectID uint,
 			_, _ = io.Copy(io.Discard, reader)
 		}
 
+		// Build env: first from compose, then from env files (env files take precedence)
 		env := make([]string, 0, len(service.Environment))
 		for k, v := range service.Environment {
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+		// Append env from env files specified in x-hlgo-envfiles
+		for _, efID := range service.XHlgoEnvfiles {
+			if content, ok := envFileContentMap[efID]; ok {
+				// Parse KEY=VALUE lines
+				for _, line := range strings.Split(content, "\n") {
+					line = strings.TrimSpace(line)
+					if line == "" || strings.HasPrefix(line, "#") {
+						continue
+					}
+					env = append(env, line)
+				}
+			}
 		}
 
 		mounts := make([]mount.Mount, 0, len(service.Volumes))
@@ -244,7 +260,7 @@ func (c *Client) StartProjectContainers(ctx context.Context, userID uint, projec
 	return nil
 }
 
-func (c *Client) SmartStartCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string) ([]DeployedContainer, bool, error) {
+func (c *Client) SmartStartCompose(ctx context.Context, userID uint, projectID uint, projectName string, yamlContent string, envFileContentMap map[int]string) ([]DeployedContainer, bool, error) {
 	// 1. Parse YAML to see desired state
 	compose, err := ParseComposeYAML(yamlContent)
 	if err != nil {
@@ -287,7 +303,7 @@ func (c *Client) SmartStartCompose(ctx context.Context, userID uint, projectID u
 
 	if needsRedeploy {
 		// Call DeployCompose (which pulls, creates, prunes)
-		deployed, err := c.DeployCompose(ctx, userID, projectID, projectName, yamlContent)
+		deployed, err := c.DeployCompose(ctx, userID, projectID, projectName, yamlContent, envFileContentMap)
 		return deployed, true, err
 	} else {
 		// Just start existing

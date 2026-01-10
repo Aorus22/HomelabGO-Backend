@@ -20,11 +20,13 @@ type DeploymentHandler struct {
 type createDeploymentRequest struct {
 	ProjectName string `json:"project_name" binding:"required"`
 	RawYAML     string `json:"raw_yaml" binding:"required"`
+	EnvFileIDs  []uint `json:"env_file_ids,omitempty"`
 }
 
 type updateDeploymentRequest struct {
-	ProjectName string `json:"project_name,omitempty"`
-	RawYAML     string `json:"raw_yaml,omitempty"`
+	ProjectName string  `json:"project_name,omitempty"`
+	RawYAML     string  `json:"raw_yaml,omitempty"`
+	EnvFileIDs  *[]uint `json:"env_file_ids,omitempty"`
 }
 
 type validateRequest struct {
@@ -40,12 +42,18 @@ type deploymentResponse struct {
 }
 
 type deploymentDetailResponse struct {
-	ID          uint   `json:"id"`
-	ProjectName string `json:"project_name"`
-	RawYAML     string `json:"raw_yaml"`
-	Status      string `json:"status"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID          uint                 `json:"id"`
+	ProjectName string               `json:"project_name"`
+	RawYAML     string               `json:"raw_yaml"`
+	Status      string               `json:"status"`
+	EnvFiles    []envFileRefResponse `json:"env_files"`
+	CreatedAt   string               `json:"created_at"`
+	UpdatedAt   string               `json:"updated_at"`
+}
+
+type envFileRefResponse struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
 }
 
 func NewDeploymentHandler(db *gorm.DB, dockerClient *docker.Client) *DeploymentHandler {
@@ -118,6 +126,21 @@ func (h *DeploymentHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// Bind env files if provided
+	if len(req.EnvFileIDs) > 0 {
+		for _, envFileID := range req.EnvFileIDs {
+			// Verify env file exists and belongs to user
+			var envFile models.EnvFile
+			if err := h.db.Where("id = ? AND user_id = ?", envFileID, userID).First(&envFile).Error; err == nil {
+				binding := models.DeploymentEnvFile{
+					DeploymentID: deployment.ID,
+					EnvFileID:    envFileID,
+				}
+				h.db.Create(&binding)
+			}
+		}
+	}
+
 	c.JSON(http.StatusCreated, deploymentResponse{
 		ID:          deployment.ID,
 		ProjectName: deployment.ProjectName,
@@ -146,11 +169,27 @@ func (h *DeploymentHandler) Get(c *gin.Context) {
 		return
 	}
 
+	// Get bound env files
+	var bindings []models.DeploymentEnvFile
+	h.db.Where("deployment_id = ?", deploymentID).Find(&bindings)
+
+	envFiles := make([]envFileRefResponse, 0, len(bindings))
+	for _, b := range bindings {
+		var envFile models.EnvFile
+		if err := h.db.First(&envFile, b.EnvFileID).Error; err == nil {
+			envFiles = append(envFiles, envFileRefResponse{
+				ID:   envFile.ID,
+				Name: envFile.Name,
+			})
+		}
+	}
+
 	c.JSON(http.StatusOK, deploymentDetailResponse{
 		ID:          deployment.ID,
 		ProjectName: deployment.ProjectName,
 		RawYAML:     deployment.RawYAML,
 		Status:      deployment.Status,
+		EnvFiles:    envFiles,
 		CreatedAt:   deployment.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   deployment.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	})
@@ -198,11 +237,45 @@ func (h *DeploymentHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// Update env file bindings if provided
+	if req.EnvFileIDs != nil {
+		// Delete existing bindings
+		h.db.Where("deployment_id = ?", deploymentID).Delete(&models.DeploymentEnvFile{})
+
+		// Create new bindings
+		for _, envFileID := range *req.EnvFileIDs {
+			var envFile models.EnvFile
+			if err := h.db.Where("id = ? AND user_id = ?", envFileID, userID).First(&envFile).Error; err == nil {
+				binding := models.DeploymentEnvFile{
+					DeploymentID: uint(deploymentID),
+					EnvFileID:    envFileID,
+				}
+				h.db.Create(&binding)
+			}
+		}
+	}
+
+	// Get current env files for response
+	var bindings []models.DeploymentEnvFile
+	h.db.Where("deployment_id = ?", deploymentID).Find(&bindings)
+
+	envFiles := make([]envFileRefResponse, 0, len(bindings))
+	for _, b := range bindings {
+		var envFile models.EnvFile
+		if err := h.db.First(&envFile, b.EnvFileID).Error; err == nil {
+			envFiles = append(envFiles, envFileRefResponse{
+				ID:   envFile.ID,
+				Name: envFile.Name,
+			})
+		}
+	}
+
 	c.JSON(http.StatusOK, deploymentDetailResponse{
 		ID:          deployment.ID,
 		ProjectName: deployment.ProjectName,
 		RawYAML:     deployment.RawYAML,
 		Status:      deployment.Status,
+		EnvFiles:    envFiles,
 		CreatedAt:   deployment.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   deployment.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	})
@@ -289,9 +362,19 @@ func (h *DeploymentHandler) Deploy(c *gin.Context) {
 	deployment.Status = "deploying"
 	h.db.Save(&deployment)
 
+	// Build envFileContentMap from all user's env files
+	// The YAML's x-hlgo-envfiles will reference IDs
+	var envFiles []models.EnvFile
+	h.db.Where("user_id = ?", userID).Find(&envFiles)
+
+	envFileContentMap := make(map[int]string)
+	for _, ef := range envFiles {
+		envFileContentMap[int(ef.ID)] = ef.Content
+	}
+
 	_ = h.docker.RemoveProjectContainers(c.Request.Context(), userID, uint(deploymentID))
 
-	deployed, err := h.docker.DeployCompose(c.Request.Context(), userID, uint(deploymentID), deployment.ProjectName, deployment.RawYAML)
+	deployed, err := h.docker.DeployCompose(c.Request.Context(), userID, uint(deploymentID), deployment.ProjectName, deployment.RawYAML, envFileContentMap)
 	if err != nil {
 		deployment.Status = "failed"
 		h.db.Save(&deployment)
@@ -368,7 +451,16 @@ func (h *DeploymentHandler) Start(c *gin.Context) {
 		return
 	}
 
-	deployed, redeployed, err := h.docker.SmartStartCompose(c.Request.Context(), userID, uint(deploymentID), deployment.ProjectName, deployment.RawYAML)
+	// Build envFileContentMap from all user's env files
+	var envFiles []models.EnvFile
+	h.db.Where("user_id = ?", userID).Find(&envFiles)
+
+	envFileContentMap := make(map[int]string)
+	for _, ef := range envFiles {
+		envFileContentMap[int(ef.ID)] = ef.Content
+	}
+
+	deployed, redeployed, err := h.docker.SmartStartCompose(c.Request.Context(), userID, uint(deploymentID), deployment.ProjectName, deployment.RawYAML, envFileContentMap)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start containers: " + err.Error()})
 		return

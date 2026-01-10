@@ -133,3 +133,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"user":  userResponse{ID: user.ID, Username: user.Username, Role: user.Role},
 	})
 }
+
+// Me returns the current authenticated user's info
+func (h *AuthHandler) Me(c *gin.Context) {
+	// Get user ID from JWT (set by middleware)
+	userIDValue, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userID := userIDValue.(uint)
+
+	var user models.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, userResponse{ID: user.ID, Username: user.Username, Role: user.Role})
+}

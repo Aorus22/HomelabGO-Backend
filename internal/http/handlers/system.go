@@ -26,7 +26,11 @@ func GetSystemStats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"cpu_percent":    cpuVal,
 		"memory_percent": v.UsedPercent,
+		"memory_used":    v.Used,
+		"memory_total":   v.Total,
 		"disk_percent":   d.UsedPercent,
+		"disk_used":      d.Used,
+		"disk_total":     d.Total,
 		"host_info": gin.H{
 			"hostname":       h.Hostname,
 			"uptime":         h.Uptime,

@@ -121,4 +121,78 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 		ws.GET("/logs/:container_id", wsHandler.StreamLogs)
 		ws.GET("/exec/:container_id", wsHandler.ExecTerminal)
 	}
+
+	// Admin routes
+	adminHandler := handlers.NewAdminHandler(deps.DB, deps.Docker)
+	adminToolsHandler := handlers.NewAdminToolsHandler()
+	adminCloudflareHandler := handlers.NewAdminCloudflareHandler(deps.DB, deps.Docker)
+
+	admin := router.Group("/admin")
+	admin.Use(middleware.JWTAuth(deps.Config.JWTSecret), middleware.AdminOnly())
+	{
+		// Users management
+		admin.GET("/users", adminHandler.ListUsers)
+		admin.GET("/users/:id", adminHandler.GetUser)
+		admin.GET("/users/:id/deployments", adminHandler.GetUserDeployments)
+		admin.GET("/users/:id/deployments/:did/containers", adminHandler.GetDeploymentContainers)
+		admin.GET("/users/:id/volumes", adminHandler.GetUserVolumes)
+		admin.GET("/users/:id/envfiles", adminHandler.GetUserEnvFiles)
+
+		// All containers
+		admin.GET("/containers", adminHandler.ListAllContainers)
+
+		// Docker Management
+		adminDockerHandler := handlers.NewAdminDockerHandler(deps.DB, deps.Docker)
+		dockerGroup := admin.Group("/docker")
+		{
+			dockerGroup.GET("/containers", adminDockerHandler.ListContainers)
+			dockerGroup.GET("/images", adminDockerHandler.ListImages)
+			dockerGroup.GET("/networks", adminDockerHandler.ListNetworks)
+			dockerGroup.GET("/volumes", adminDockerHandler.ListVolumes)
+		}
+
+		// Tools
+		admin.POST("/tools/speedtest", adminToolsHandler.RunSpeedtest)
+
+		// Admin Files
+		adminFilesHandler := handlers.NewAdminFilesHandler(deps.Config.DataVolumePath)
+		admin.GET("/files", adminFilesHandler.ListFiles)
+		admin.GET("/files/content", adminFilesHandler.GetFile)
+		admin.POST("/files/content", adminFilesHandler.SaveFile)
+
+		// Terminal WS (needs specific handling for WS upgrade in protected route)
+		// Usually WS requests don't send Authorization header, so we pass token in query
+		// But here we are inside a middleware that expects header.
+		// Ideally we register this outside or handle auth in handler.
+		// For now, let's keep it here but assume client sends header (which RN can do for WS)
+		admin.GET("/tools/terminal", adminFilesHandler.HostTerminal)
+
+		// Cloudflare instances
+		admin.GET("/cloudflare", adminCloudflareHandler.List)
+		admin.POST("/cloudflare", adminCloudflareHandler.Create)
+		admin.POST("/cloudflare/:id/start", adminCloudflareHandler.Start)
+		admin.POST("/cloudflare/:id/stop", adminCloudflareHandler.Stop)
+		admin.DELETE("/cloudflare/:id", adminCloudflareHandler.Delete)
+
+		// System Management (Cron & Services)
+		adminSystemHandler := handlers.NewAdminSystemHandler()
+		systemGroup := admin.Group("/system")
+		{
+			systemGroup.GET("/cron", adminSystemHandler.GetCron)
+			systemGroup.POST("/cron", adminSystemHandler.SaveCron)
+			// System Services
+			systemRoutes := systemGroup.Group("/services")
+			{
+				systemRoutes.GET("", adminSystemHandler.ListServices)
+				systemRoutes.POST("", adminSystemHandler.CreateService)
+				systemRoutes.POST("/:id/action", adminSystemHandler.ServiceAction)
+				systemRoutes.GET("/:id/logs", adminSystemHandler.GetServiceLogs)
+				systemRoutes.DELETE("/:id", adminSystemHandler.DeleteService)
+			}
+
+			// Ports & Networks
+			systemGroup.GET("/ports", adminSystemHandler.ListPorts)
+			systemGroup.GET("/networks", adminSystemHandler.ListNetworks)
+		}
+	}
 }

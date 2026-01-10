@@ -34,7 +34,7 @@ func NewWebSocketHandler(dockerClient *docker.Client, jwtSecret string) *WebSock
 	}
 }
 
-func (h *WebSocketHandler) authenticateWebSocket(c *gin.Context) (uint, error) {
+func (h *WebSocketHandler) authenticateWebSocket(c *gin.Context) (uint, string, error) {
 	token := c.Query("token")
 	if token == "" {
 		authHeader := c.GetHeader("Authorization")
@@ -47,22 +47,25 @@ func (h *WebSocketHandler) authenticateWebSocket(c *gin.Context) (uint, error) {
 	}
 
 	if token == "" {
-		return 0, http.ErrNoCookie
+		return 0, "", http.ErrNoCookie
 	}
 
 	claims, err := auth.ParseToken(token, h.jwtSecret)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
-	return claims.UserID, nil
+	return claims.UserID, claims.Role, nil
 }
 
 func (h *WebSocketHandler) StreamLogs(c *gin.Context) {
-	userID, err := h.authenticateWebSocket(c)
+	userID, role, err := h.authenticateWebSocket(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if role == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("container_id")
@@ -99,10 +102,13 @@ func (h *WebSocketHandler) StreamLogs(c *gin.Context) {
 }
 
 func (h *WebSocketHandler) ExecTerminal(c *gin.Context) {
-	userID, err := h.authenticateWebSocket(c)
+	userID, role, err := h.authenticateWebSocket(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if role == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("container_id")

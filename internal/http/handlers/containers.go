@@ -44,6 +44,9 @@ func (h *ContainerHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 
 	containerID := c.Param("id")
 	if containerID == "" {
@@ -66,6 +69,9 @@ func (h *ContainerHandler) Start(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 
 	containerID := c.Param("id")
 	if containerID == "" {
@@ -86,6 +92,9 @@ func (h *ContainerHandler) Stop(c *gin.Context) {
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if c.GetString("role") == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("id")
@@ -108,6 +117,9 @@ func (h *ContainerHandler) Restart(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 
 	containerID := c.Param("id")
 	if containerID == "" {
@@ -128,6 +140,9 @@ func (h *ContainerHandler) Logs(c *gin.Context) {
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if c.GetString("role") == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("id")
@@ -154,6 +169,9 @@ func (h *ContainerHandler) Pull(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 
 	containerID := c.Param("id")
 	if containerID == "" {
@@ -174,6 +192,9 @@ func (h *ContainerHandler) Recreate(c *gin.Context) {
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if c.GetString("role") == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("id")
@@ -196,6 +217,9 @@ func (h *ContainerHandler) Stats(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 
 	containerID := c.Param("id")
 	if containerID == "" {
@@ -217,6 +241,9 @@ func (h *ContainerHandler) Mounts(c *gin.Context) {
 	if userID == 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
+	}
+	if c.GetString("role") == "admin" {
+		userID = 0
 	}
 
 	containerID := c.Param("id")

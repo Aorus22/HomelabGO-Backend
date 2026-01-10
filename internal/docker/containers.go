@@ -77,10 +77,12 @@ func (c *Client) GetContainerByID(ctx context.Context, containerID string, userI
 		return nil, fmt.Errorf("container not found")
 	}
 
-	// Verify ownership
-	ownerID := inspect.Config.Labels["owner_id"]
-	if ownerID != fmt.Sprintf("%d", userID) {
-		return nil, fmt.Errorf("access denied")
+	// Verify ownership (bypass if userID is 0, used for admin)
+	if userID != 0 {
+		ownerID := inspect.Config.Labels["owner_id"]
+		if ownerID != fmt.Sprintf("%d", userID) {
+			return nil, fmt.Errorf("access denied")
+		}
 	}
 
 	createdTime, _ := time.Parse(time.RFC3339Nano, inspect.Created)

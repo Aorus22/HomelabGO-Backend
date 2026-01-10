@@ -22,6 +22,9 @@ func NewContainerFileHandler(docker *docker.Client) *ContainerFileHandler {
 
 func (h *ContainerFileHandler) ListFiles(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -40,6 +43,9 @@ func (h *ContainerFileHandler) ListFiles(c *gin.Context) {
 
 func (h *ContainerFileHandler) GetFileContent(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -62,6 +68,9 @@ func (h *ContainerFileHandler) GetFileContent(c *gin.Context) {
 
 func (h *ContainerFileHandler) DownloadFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -82,6 +91,9 @@ func (h *ContainerFileHandler) DownloadFile(c *gin.Context) {
 
 func (h *ContainerFileHandler) UploadFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -118,6 +130,9 @@ func (h *ContainerFileHandler) UploadFile(c *gin.Context) {
 
 func (h *ContainerFileHandler) SaveFileContent(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -145,6 +160,9 @@ func (h *ContainerFileHandler) SaveFileContent(c *gin.Context) {
 
 func (h *ContainerFileHandler) CreateDirectory(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -174,6 +192,9 @@ func (h *ContainerFileHandler) CreateDirectory(c *gin.Context) {
 
 func (h *ContainerFileHandler) DeleteFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 	path := c.Query("path")
 
@@ -193,6 +214,9 @@ func (h *ContainerFileHandler) DeleteFile(c *gin.Context) {
 
 func (h *ContainerFileHandler) RenameFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 
 	var req struct {
@@ -221,6 +245,9 @@ func (h *ContainerFileHandler) RenameFile(c *gin.Context) {
 
 func (h *ContainerFileHandler) CopyFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 
 	var req struct {
@@ -249,6 +276,9 @@ func (h *ContainerFileHandler) CopyFile(c *gin.Context) {
 
 func (h *ContainerFileHandler) MoveFile(c *gin.Context) {
 	userID := httputil.GetUserID(c)
+	if c.GetString("role") == "admin" {
+		userID = 0
+	}
 	containerID := c.Param("id")
 
 	var req struct {

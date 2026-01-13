@@ -159,6 +159,13 @@ func RegisterRoutes(router *gin.Engine, deps Dependencies) {
 		admin.GET("/files", adminFilesHandler.ListFiles)
 		admin.GET("/files/content", adminFilesHandler.GetFile)
 		admin.POST("/files/content", adminFilesHandler.SaveFile)
+		admin.POST("/files/create", adminFilesHandler.CreateFile)
+		admin.POST("/files/mkdir", adminFilesHandler.CreateDirectory)
+		admin.DELETE("/files", adminFilesHandler.DeleteFile)
+		admin.POST("/files/rename", adminFilesHandler.RenameFile)
+		admin.POST("/files/copy", adminFilesHandler.CopyFile)
+		admin.POST("/files/move", adminFilesHandler.MoveFile)
+		admin.POST("/files/chmod", adminFilesHandler.ChmodFile)
 
 		// Terminal WS (needs specific handling for WS upgrade in protected route)
 		// Usually WS requests don't send Authorization header, so we pass token in query
